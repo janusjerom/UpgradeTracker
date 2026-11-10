@@ -354,10 +354,73 @@
         }
         return (typeof lvl === "number" && lvl > 0) ? lvl * 3600 : 0;
       }
+      /* Potion boosts (the boosts object in the export): each field is
+         the seconds of boosted speed left at the export timestamp. The
+         JSON timer does NOT include the boost, so it is deducted manually
+         here, per category only:
+           boosts.builder_boost  — Builder Potion, 10x, Builders items
+                                   only (Home Village buildings + heroes,
+                                   i.e. acct.builders)
+           boosts.research_boost — Research Potion, 24x, Lab items only
+                                   (acct.lab)
+           boosts.pet_boost      — Pet Potion, 24x, Pets items only
+                                   (acct.pets)
+         Builder Base items are never boosted by these potions, and
+         boosts.clocktower_cooldown is ignored entirely: it is only the
+         cooldown until the Clock Tower can be used again. A missing
+         boost field means no deduction for that category.
+         Work done since the export runs at Fx speed while the boost
+         lasts, so the finish stays fixed: with boostLeft = max(0,
+         boost - (now - timestamp)), remaining work above boostLeft*F
+         finishes in remainingWork - (F-1)*boostLeft, and work that fits
+         inside the boost finishes in remainingWork/F. At the export
+         moment that is the plain rule on the raw timer: e.g. for
+         Builders (F=10) timer - 9*boostLeft when timer > boostLeft*10,
+         else timer/10; for Lab / Pets (F=24) timer - 23*boostLeft when
+         timer > boostLeft*24, else timer/24. Helper cuts still apply
+         on top of the boosted time (see helperCutSeconds). */
+      function boostLeftSeconds(boostSecs, acct, nowSec){
+        var b0 = (typeof boostSecs === "number") ? boostSecs : 0;
+        if(!b0 || b0 <= 0 || !acct) return 0;
+        var left = b0 - (nowSec - acct.timestamp);
+        if(left > b0) left = b0;
+        return left > 0 ? left : 0;
+      }
+      function builderBoostLeft(acct, nowSec){
+        return boostLeftSeconds(acct && acct.builderBoost, acct, nowSec);
+      }
+      /* Category boost for an item: { factor, boost } or null when the
+         item's category has no boost stored on the account. */
+      function categoryBoost(item, acct){
+        if(acct.builders && acct.builders.indexOf(item) >= 0){
+          return { factor: 10, boost: (typeof acct.builderBoost === "number" ? acct.builderBoost : 0) };
+        }
+        if(acct.lab && acct.lab.indexOf(item) >= 0){
+          return { factor: 24, boost: (typeof acct.researchBoost === "number" ? acct.researchBoost : 0) };
+        }
+        if(acct.pets && acct.pets.indexOf(item) >= 0){
+          return { factor: 24, boost: (typeof acct.petBoost === "number" ? acct.petBoost : 0) };
+        }
+        return null;
+      }
       function displayRemaining(item, acct, nowSec){
-        var rem = remaining(item, acct, nowSec);
-        if(rem <= 0) return rem;
-        return rem - helperCutSeconds(item, acct);
+        var elapsed = nowSec - acct.timestamp;
+        var cat = categoryBoost(item, acct);
+        var b0 = cat ? cat.boost : 0;
+        var factor = cat ? cat.factor : 0;
+        if(!b0 || b0 <= 0 || !factor){
+          var rem0 = item.timer - elapsed;
+          if(rem0 <= 0) return rem0;
+          return rem0 - helperCutSeconds(item, acct);
+        }
+        var boostLeft = boostLeftSeconds(b0, acct, nowSec);
+        var workDone = elapsed <= b0 ? elapsed * factor : b0 * factor + (elapsed - b0);
+        var remainingWork = item.timer - workDone;
+        if(remainingWork <= 0) return remainingWork;
+        var eff = boostLeft > 0
+          ? (remainingWork > boostLeft * factor ? remainingWork - (factor - 1) * boostLeft : remainingWork / factor)
+          : remainingWork;
+        return eff - helperCutSeconds(item, acct);
       }
       /* All clock times are shown in IST (Asia/Kolkata), never the device
          timezone — the widget webview may not share the phone's zone. */
@@ -620,8 +683,19 @@
             if(typeof h.lvl === "number") helperLvls[h.data] = h.lvl;
           }
         });
+        /* Potion boosts are time deductions (builder_boost 10x for
+           Builders, research_boost 24x for Lab, pet_boost 24x for Pets);
+           a field missing from the export means no deduction for that
+           category. clocktower_cooldown is just the Clock Tower reuse
+           cooldown and is never deducted. */
+        var builderBoost = 0, researchBoost = 0, petBoost = 0;
+        if(obj.boosts){
+          if(typeof obj.boosts.builder_boost === "number" && obj.boosts.builder_boost > 0) builderBoost = obj.boosts.builder_boost;
+          if(typeof obj.boosts.research_boost === "number" && obj.boosts.research_boost > 0) researchBoost = obj.boosts.research_boost;
+          if(typeof obj.boosts.pet_boost === "number" && obj.boosts.pet_boost > 0) petBoost = obj.boosts.pet_boost;
+        }
         return {
-          tag: String(obj.tag), name: "", th: th, bh: bh, timestamp: obj.timestamp, helpers: helpers, helperLvls: helperLvls,
+          tag: String(obj.tag), name: "", th: th, bh: bh, timestamp: obj.timestamp, helpers: helpers, helperLvls: helperLvls, builderBoost: builderBoost, researchBoost: researchBoost, petBoost: petBoost,
           builders: timedItems(obj.buildings).concat(timedItems(obj.heroes)),
           lab: timedItems(obj.units).concat(timedItems(obj.spells)).concat(timedItems(obj.siege_machines)),
           pets: timedItems(obj.pets),
