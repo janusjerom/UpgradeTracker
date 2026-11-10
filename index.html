@@ -219,6 +219,13 @@
         </button>
       </header>
 
+      <nav class="accounts" id="accountTabs" aria-label="Switch account"></nav>
+
+      <div class="meta" id="accountMeta"></div>
+      <div class="stale" id="staleBox" hidden></div>
+
+      <main id="sections"></main>
+
       <section class="panel" aria-labelledby="importTitle">
         <h2 id="importTitle">Paste JSON</h2>
         <label for="jsonInput">Village JSON export</label>
@@ -232,14 +239,7 @@
         <div class="msg" id="importMsg" hidden></div>
       </section>
 
-      <nav class="accounts" id="accountTabs" aria-label="Switch account"></nav>
-
-      <div class="meta" id="accountMeta"></div>
-      <div class="stale" id="staleBox" hidden></div>
-
-      <main id="sections"></main>
-
-      <section class="panel" aria-labelledby="manageTitle">
+      <section class="panel" id="managePanel" aria-labelledby="manageTitle">
         <h2 id="manageTitle">Manage account</h2>
         <p id="manageWho"></p>
         <label for="nameInput">Display name for this account</label>
@@ -262,7 +262,7 @@
         <p style="margin-top:10px">Your accounts are saved in Chrome on this phone only, so use the same browser each time. If it ever opens as “Muse” instead, you opened the Muse-app copy — use the link in Chrome and the tracker icon will be separate.</p>
       </section>
 
-      <p class="foot">Timers count down from the moment of your JSON export.<br />Exported 18 Sep 2026 data is preloaded — most of it will already show DONE until you paste a fresh export.</p>
+      <p class="foot">Timers count down from the moment of your JSON export.</p>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -273,49 +273,27 @@
       var NAMES = (typeof __NAMES__ !== "undefined") ? __NAMES__ : {};
       var DURATIONS = (typeof __DURATIONS__ !== "undefined") ? __DURATIONS__ : {};
 
-      /* Preloaded from your 18 Sep 2026 exports (see report). timer = seconds
-         remaining at export; lvl = current level, target = lvl+1 (0 -> 1). */
-      function it(data, lvl, timer){ return { data:data, lvl:lvl, timer:timer }; }
-      var DEFAULT_ACCOUNTS = [
-        { tag:"#9YPPLQURJ", name:"", th:17, bh:10, timestamp:1789737376, helpers:[93000000,93000001,93000002],
-          builders:[ it(1000000,12,276399), it(1000059,8,1161820), it(1000089,0,215975), it(1000079,0,319636), it(1000084,0,279347), it(1000085,0,355614) ],
-          lab:[ it(4000012,11,472560) ],
-          pets:[ it(73000011,7,660122) ],
-          bb:[ it(1000050,6,339816), it(12000014,6,21), it(28000003,30,578480), it(4000041,14,135855) ] },
-        { tag:"#PVYJRPPYL", name:"", th:16, bh:10, timestamp:1789737424, helpers:[93000000,93000001,93000002],
-          builders:[ it(1000005,16,339857), it(1000067,4,484622), it(1000068,9,404848), it(1000071,9,308401), it(1000072,2,708286), it(28000004,29,233021) ],
-          lab:[ it(4000007,6,560980) ],
-          pets:[ it(73000004,4,148405) ],
-          bb:[ it(1000038,9,121203), it(1000055,6,432722), it(4000041,10,87144) ] }
-      ];
-
-      var LS_KEY = "coc-tracker-web-v1";
+      /* Nothing is preloaded. Every account, Town Hall level and timer on this
+         page comes from a village JSON export the user imports — the page
+         starts empty and the upload below adds the first Town Hall. */
+      var LS_KEY = "coc-tracker-web-v2";
       var state = loadState();
 
-      function clone(o){ return JSON.parse(JSON.stringify(o)); }
       function loadState(){
         try{
           var raw = localStorage.getItem(LS_KEY);
           if(raw){
             var s = JSON.parse(raw);
-            if(s && Array.isArray(s.accounts) && s.accounts.length){
-              /* Drop the two extra preloaded Sep 2026 exports (TH15 + second TH17) —
-                 only the TH17 and TH16 accounts are kept. Fresh re-imports of those
-                 tags (different timestamp) are left alone. */
-              s.accounts = s.accounts.filter(function(a){
-                if(a.tag === "#8L0CG8J08" && a.timestamp === 1789737488) return false;
-                if(a.tag === "#QQ82RJRCG" && a.timestamp === 1789737537) return false;
-                return true;
-              });
-              if(!s.accounts.length){ s.accounts = clone(DEFAULT_ACCOUNTS); }
+            if(s && Array.isArray(s.accounts)){
               var stillThere = false;
               s.accounts.forEach(function(a){ if(a.tag === s.selected) stillThere = true; });
-              if(!stillThere) s.selected = s.accounts[0].tag;
+              if(!stillThere) s.selected = s.accounts.length ? s.accounts[0].tag : "";
+              if(typeof s.lastSynced !== "number") s.lastSynced = 0;
               return s;
             }
           }
         }catch(e){}
-        return { accounts: clone(DEFAULT_ACCOUNTS), selected: DEFAULT_ACCOUNTS[0].tag, lastSynced: 0 };
+        return { accounts: [], selected: "", lastSynced: 0 };
       }
       function saveState(){
         try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
@@ -431,7 +409,7 @@
           brandTitle.textContent = "CoC Tracker";
           brandSub.textContent = "CLASH OF CLANS UPGRADES";
           metaEl.innerHTML = ""; staleEl.hidden = true;
-          sectionsEl.innerHTML = '<section class="section"><div class="idle"><b>No accounts yet</b> — paste a village JSON export above to add one.</div></section>';
+          sectionsEl.innerHTML = '<section class="section"><div class="idle"><b>No Town Hall yet</b> — use the upload below to add your first village JSON export.</div></section>';
           return;
         }
         brandTitle.textContent = acct.name || acct.tag;
@@ -443,7 +421,7 @@
         var ageSec = nowSec - acct.timestamp;
         if(ageSec > 24*3600){
           staleEl.hidden = false;
-          staleEl.innerHTML = "⚠ This export is <b>" + ageText(ageSec) + " old</b>, so finished upgrades show as DONE and anything you started since isn't here. Paste a fresh export above to bring it up to date.";
+          staleEl.innerHTML = "⚠ This export is <b>" + ageText(ageSec) + " old</b>, so finished upgrades show as DONE and anything you started since isn't here. Paste a fresh export below to bring it up to date.";
         } else { staleEl.hidden = true; }
 
         var hasApprentice = acct.helpers.indexOf(93000000) >= 0;
@@ -472,6 +450,7 @@
         var del = document.getElementById("deleteBtn");
         del.textContent = "Delete this account"; del.classList.remove("confirm");
         hideMsg("manageMsg");
+        document.getElementById("managePanel").style.display = acct ? "" : "none";
         if(!acct){ manageWho.textContent = "No account selected."; nameInput.value = ""; return; }
         manageWho.innerHTML = "Selected: <b>TH" + acct.th + "</b> account";
         nameInput.value = acct.name || "";
